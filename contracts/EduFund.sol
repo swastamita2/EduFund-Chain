@@ -9,6 +9,9 @@ pragma solidity ^0.8.18;
 contract EduFund {
     // --- State Variables ---
     address public owner;
+    bool public paused;
+    uint256 public constant MAX_MESSAGE_LENGTH = 120;
+    bool private locked;
     
     /**
      * @dev totalDonations mencatat AKUMULASI historis seluruh dana yang pernah masuk.
@@ -41,10 +44,26 @@ contract EduFund {
         uint256 timestamp
     );
 
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event Paused(address indexed account);
+    event Unpaused(address indexed account);
+
     // --- Modifiers ---
     modifier onlyOwner() {
         require(msg.sender == owner, "Akses Ditolak: Hanya admin yayasan yang diizinkan");
         _;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "Kontrak sedang dijeda");
+        _;
+    }
+
+    modifier nonReentrant() {
+        require(!locked, "Reentrancy terdeteksi");
+        locked = true;
+        _;
+        locked = false;
     }
 
     // --- Constructor ---
@@ -55,8 +74,9 @@ contract EduFund {
     /**
      * @dev Fungsi untuk menerima donasi ETH beserta pesan dari donatur.
      */
-    function donate(string memory _message) public payable {
+    function donate(string memory _message) public payable whenNotPaused {
         require(msg.value > 0, "Nominal donasi harus lebih dari 0");
+        require(bytes(_message).length <= MAX_MESSAGE_LENGTH, "Pesan terlalu panjang");
         
         totalDonations += msg.value;
         donorBalances[msg.sender] += msg.value;
@@ -88,7 +108,7 @@ contract EduFund {
      * @dev Fungsi untuk menarik dana donasi ke wallet yayasan.
      * Menggunakan metode .call() (Best Practice) untuk keamanan dan fleksibilitas gas.
      */
-    function withdrawFunds(uint256 _amount) public onlyOwner {
+    function withdrawFunds(uint256 _amount) public onlyOwner nonReentrant {
         require(_amount <= address(this).balance, "Saldo tidak mencukupi");
         
         // Pola Checks-Effects-Interactions: Transfer dilakukan di akhir
@@ -103,6 +123,7 @@ contract EduFund {
      * Menerima transaksi transfer langsung dengan biaya gas minimal.
      */
     receive() external payable {
+        require(!paused, "Kontrak sedang dijeda");
         totalDonations += msg.value;
         donorBalances[msg.sender] += msg.value;
         
@@ -113,5 +134,31 @@ contract EduFund {
         
         // Event direkam dengan pesan default untuk membedakan jalur donasi
         emit DonationReceived(msg.sender, msg.value, "Direct Transfer", block.timestamp);
+    }
+
+    /**
+     * @dev Menjeda kontrak saat keadaan darurat.
+     */
+    function pause() external onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /**
+     * @dev Membuka kembali kontrak setelah jeda.
+     */
+    function unpause() external onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
+    /**
+     * @dev Transfer kepemilikan kontrak ke owner baru.
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Owner baru tidak valid");
+        address previousOwner = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(previousOwner, newOwner);
     }
 }

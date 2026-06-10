@@ -1,22 +1,29 @@
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ExternalLink,
+  Heart,
+  Loader2,
+  Lock,
+  Wallet,
+} from "lucide-react";
 
-// ── ABI hanya fungsi yang dipakai DonationCard ──────────────────────────────
+// ── ABI ────────────────────────────────────────────────────────────────
 const EDUFUND_ABI = [
-  "function donate() external payable",
+  "function donate(string memory _message) external payable",
   "function getBalance() external view returns (uint256)",
+  "function getDonorCount() external view returns (uint256)",
   "function totalDonations() external view returns (uint256)",
-  "event DonationReceived(address indexed donor, uint256 amount, uint256 timestamp)",
+  "event DonationReceived(address indexed donor, uint256 amount, string message, uint256 timestamp)",
 ];
 
-// ── Ganti dengan address kontrak kalian setelah deploy di Sepolia ───────────
 const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000";
+const SEPOLIA_CHAIN_ID = "0xaa36a7"; // 11155111
+const ETH_TO_IDR = 52000000;
 
-// ── Konstanta ────────────────────────────────────────────────────────────────
-const SEPOLIA_CHAIN_ID = "0xaa36a7"; // 11155111 dalam hex
-const ETH_TO_IDR = 52_000_000;      // estimasi kurs, sesuaikan
-
-// ── Status tx ────────────────────────────────────────────────────────────────
 const STATUS = {
   IDLE: "idle",
   WAITING_WALLET: "waiting_wallet",
@@ -25,43 +32,49 @@ const STATUS = {
   ERROR: "error",
 };
 
-export default function DonationCard({ onDonationSuccess }) {
-  const [account, setAccount]         = useState(null);
-  const [network, setNetwork]         = useState(null);
-  const [balance, setBalance]         = useState("0");
-  const [amount, setAmount]           = useState("");
-  const [status, setStatus]           = useState(STATUS.IDLE);
-  const [txHash, setTxHash]           = useState("");
-  const [errorMsg, setErrorMsg]       = useState("");
+export default function DonationCard({ onDonationSuccess, onMetricsChange, onConnectReady }) {
+  const [account, setAccount] = useState(null);
+  const [network, setNetwork] = useState(null);
+  const [amount, setAmount] = useState("");
+  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState(STATUS.IDLE);
+  const [txHash, setTxHash] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
 
-  // ── Estimasi IDR ─────────────────────────────────────────────────────────
   const idrEstimate = amount
     ? `≈ Rp ${Math.round(parseFloat(amount) * ETH_TO_IDR).toLocaleString("id-ID")}`
-    : "";
+    : "≈ Rp 0";
 
-  // ── Ambil saldo kontrak ──────────────────────────────────────────────────
-  const fetchBalance = useCallback(async (provider) => {
+  const fetchBalance = useCallback(
+    async (provider) => {
     try {
       const contract = new ethers.Contract(CONTRACT_ADDRESS, EDUFUND_ABI, provider);
       const bal = await contract.getBalance();
-      setBalance(ethers.formatEther(bal));
-    } catch {
-      // kontrak belum di-deploy atau address placeholder — abaikan
-    }
-  }, []);
+      const donors = await contract.getDonorCount();
 
-  // ── Cek jaringan ─────────────────────────────────────────────────────────
+      const nextBalance = ethers.formatEther(bal);
+      const nextDonors = donors.toString();
+
+      if (onMetricsChange) {
+        onMetricsChange({ balance: nextBalance, donorCount: nextDonors });
+      }
+    } catch {
+      // Ignore if contract is placeholder
+    }
+    },
+    [onMetricsChange]
+  );
+
   const checkNetwork = useCallback(async (provider) => {
     const net = await provider.getNetwork();
     setNetwork(net.name);
     setIsWrongNetwork(net.chainId !== BigInt(parseInt(SEPOLIA_CHAIN_ID, 16)));
   }, []);
 
-  // ── Connect MetaMask ─────────────────────────────────────────────────────
-  const connectWallet = async () => {
+  const connectWallet = useCallback(async () => {
     if (!window.ethereum) {
-      setErrorMsg("MetaMask tidak ditemukan. Silakan install terlebih dahulu.");
+      setErrorMsg("MetaMask tidak ditemukan. Silakan install ekstensi MetaMask.");
       setStatus(STATUS.ERROR);
       return;
     }
@@ -72,12 +85,11 @@ export default function DonationCard({ onDonationSuccess }) {
       await checkNetwork(provider);
       await fetchBalance(provider);
     } catch (err) {
-      setErrorMsg("Koneksi wallet ditolak.");
+      setErrorMsg("Koneksi wallet ditolak pengguna.");
       setStatus(STATUS.ERROR);
     }
-  };
+  }, [checkNetwork, fetchBalance]);
 
-  // ── Switch ke Sepolia ────────────────────────────────────────────────────
   const switchToSepolia = async () => {
     try {
       await window.ethereum.request({
@@ -85,393 +97,294 @@ export default function DonationCard({ onDonationSuccess }) {
         params: [{ chainId: SEPOLIA_CHAIN_ID }],
       });
     } catch (err) {
-      setErrorMsg("Gagal berpindah jaringan ke Sepolia.");
+      setErrorMsg("Gagal berpindah ke jaringan Sepolia.");
       setStatus(STATUS.ERROR);
     }
   };
 
-  // ── Kirim donasi ─────────────────────────────────────────────────────────
   const handleDonate = async () => {
     setErrorMsg("");
-
-    // Validasi input
     const parsed = parseFloat(amount);
     if (!amount || isNaN(parsed) || parsed <= 0) {
-      setErrorMsg("Masukkan nominal ETH yang valid (contoh: 0.05).");
+      setErrorMsg("Masukkan nominal ETH yang valid.");
       return;
     }
     if (parsed < 0.001) {
-      setErrorMsg("Donasi minimal 0.001 ETH.");
+      setErrorMsg("Donasi minimal adalah 0.001 ETH.");
       return;
     }
 
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer   = await provider.getSigner();
+      const signer = await provider.getSigner();
       const contract = new ethers.Contract(CONTRACT_ADDRESS, EDUFUND_ABI, signer);
 
-      // Tahap 1: tunggu approval MetaMask
       setStatus(STATUS.WAITING_WALLET);
-      const tx = await contract.donate({
+      const donateMessage = message.trim() === "" ? "Hamba Allah" : message;
+      
+      const tx = await contract.donate(donateMessage, {
         value: ethers.parseEther(amount),
       });
 
-      // Tahap 2: tx terbroadcast, tunggu konfirmasi
       setTxHash(tx.hash);
       setStatus(STATUS.PENDING);
 
-      // Tunggu 1 konfirmasi block
       await tx.wait(1);
 
-      // Sukses
       setStatus(STATUS.SUCCESS);
       setAmount("");
+      setMessage("");
       await fetchBalance(provider);
 
-      // Callback ke parent (untuk refresh HistoryTable, dsb.)
       if (onDonationSuccess) onDonationSuccess(tx.hash);
 
     } catch (err) {
       if (err.code === 4001 || err.code === "ACTION_REJECTED") {
         setErrorMsg("Transaksi dibatalkan oleh user.");
       } else if (err.code === "INSUFFICIENT_FUNDS") {
-        setErrorMsg("Saldo ETH di wallet tidak cukup.");
+        setErrorMsg("Saldo ETH di wallet tidak mencukupi.");
       } else {
-        setErrorMsg(err.reason || err.message || "Transaksi gagal.");
+        setErrorMsg("Transaksi gagal diproses.");
       }
       setStatus(STATUS.ERROR);
     }
   };
 
-  // ── Listen perubahan akun / jaringan dari MetaMask ───────────────────────
   useEffect(() => {
     if (!window.ethereum) return;
     const handleAccountsChanged = (accounts) => setAccount(accounts[0] || null);
-    const handleChainChanged    = () => window.location.reload();
+    const handleChainChanged = () => window.location.reload();
 
     window.ethereum.on("accountsChanged", handleAccountsChanged);
-    window.ethereum.on("chainChanged",    handleChainChanged);
+    window.ethereum.on("chainChanged", handleChainChanged);
     return () => {
       window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-      window.ethereum.removeListener("chainChanged",    handleChainChanged);
+      window.ethereum.removeListener("chainChanged", handleChainChanged);
     };
   }, []);
 
-  // ── Format alamat singkat ─────────────────────────────────────────────────
-  const shortAddr = (addr) =>
-    addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : "";
-
-  // ── Label tombol utama ───────────────────────────────────────────────────
-  const buttonLabel = () => {
-    switch (status) {
-      case STATUS.WAITING_WALLET: return "Menunggu konfirmasi MetaMask...";
-      case STATUS.PENDING:        return "Memproses transaksi...";
-      default:                    return "Donasi via MetaMask";
+  useEffect(() => {
+    if (onConnectReady) {
+      onConnectReady(() => connectWallet());
     }
-  };
+  }, [connectWallet, onConnectReady]);
 
+  const shortAddr = (addr) => (addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : "");
   const isLoading = status === STATUS.WAITING_WALLET || status === STATUS.PENDING;
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // RENDER
-  // ════════════════════════════════════════════════════════════════════════════
   return (
-    <div style={styles.wrapper}>
-
-      {/* ── Header saldo kontrak ── */}
-      <div style={styles.hero}>
-        <p style={styles.heroLabel}>Total donasi terkumpul</p>
-        <p style={styles.heroAmount}>{parseFloat(balance).toFixed(4)} ETH</p>
-        <p style={styles.heroSub}>dari smart contract EduFund · Sepolia Testnet</p>
-      </div>
-
-      <div style={styles.body}>
-
-        {/* ── Status wallet ── */}
-        {!account ? (
-          <button style={styles.btnConnect} onClick={connectWallet}>
-            Hubungkan MetaMask
-          </button>
-        ) : (
-          <div style={styles.walletRow}>
-            <span style={styles.dot} />
-            <span style={styles.walletAddr}>{shortAddr(account)}</span>
-            {network && (
-              <span style={isWrongNetwork ? styles.badgeDanger : styles.badgeOk}>
-                {isWrongNetwork ? "Jaringan salah" : network}
-              </span>
-            )}
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="relative"
+    >
+      <div className="absolute -inset-4 rounded-[32px] bg-brand-100/60 blur-2xl" />
+      <div className="glass-card relative rounded-[28px] p-6 shadow-soft">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="font-heading text-xl text-slate-900">
+              Donasi untuk Pendidikan
+            </h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Bantu sediakan alat tulis, buku, dan mainan edukatif.
+            </p>
           </div>
-        )}
-
-        {/* ── Peringatan jaringan salah ── */}
-        {isWrongNetwork && account && (
-          <div style={styles.alertWarn}>
-            <span>Harap gunakan jaringan Sepolia Testnet.</span>
-            <button style={styles.btnSwitch} onClick={switchToSepolia}>
-              Switch ke Sepolia
-            </button>
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-500">
+            <Heart className="h-5 w-5" />
           </div>
-        )}
-
-        {/* ── Form donasi ── */}
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Nominal donasi (ETH)</label>
-          <div style={styles.inputRow}>
-            <input
-              type="number"
-              step="0.001"
-              min="0.001"
-              placeholder="cth: 0.05"
-              value={amount}
-              onChange={(e) => {
-                setAmount(e.target.value);
-                if (status === STATUS.SUCCESS || status === STATUS.ERROR) {
-                  setStatus(STATUS.IDLE);
-                  setErrorMsg("");
-                }
-              }}
-              disabled={isLoading || !account || isWrongNetwork}
-              style={styles.input}
-            />
-            <span style={styles.ethBadge}>ETH</span>
-          </div>
-          {idrEstimate && (
-            <p style={styles.idrHint}>{idrEstimate} (estimasi)</p>
-          )}
         </div>
 
-        {/* ── Tombol donasi ── */}
-        <button
-          style={{
-            ...styles.btnDonate,
-            opacity: isLoading || !account || isWrongNetwork || !amount ? 0.55 : 1,
-            cursor:  isLoading || !account || isWrongNetwork || !amount ? "not-allowed" : "pointer",
-          }}
-          onClick={handleDonate}
-          disabled={isLoading || !account || isWrongNetwork || !amount}
-        >
-          {isLoading && <span style={styles.spinner} />}
-          {buttonLabel()}
-        </button>
-
-        {/* ── Status: sukses ── */}
-        {status === STATUS.SUCCESS && (
-          <div style={styles.alertSuccess}>
-            <p style={{ margin: "0 0 4px", fontWeight: 500 }}>Donasi berhasil! Terima kasih.</p>
-            {txHash && (
-              <a
-                href={`https://sepolia.etherscan.io/tx/${txHash}`}
-                target="_blank"
-                rel="noreferrer"
-                style={styles.txLink}
-              >
-                Lihat di Etherscan ↗
-              </a>
-            )}
-          </div>
-        )}
-
-        {/* ── Status: error ── */}
-        {status === STATUS.ERROR && errorMsg && (
-          <div style={styles.alertError}>{errorMsg}</div>
-        )}
-
-        {/* ── Hash tx (saat pending) ── */}
-        {status === STATUS.PENDING && txHash && (
-          <p style={styles.txPending}>
-            Tx hash:{" "}
-            <a
-              href={`https://sepolia.etherscan.io/tx/${txHash}`}
-              target="_blank"
-              rel="noreferrer"
-              style={styles.txLink}
+        <div className="mt-5 space-y-4">
+          {!account ? (
+            <button
+              onClick={connectWallet}
+              className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+              type="button"
             >
-              {txHash.slice(0, 20)}...
-            </a>
-          </p>
-        )}
+              Hubungkan MetaMask
+            </button>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-brand-700">
+                    <Wallet className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                      Wallet terhubung
+                    </p>
+                    <p className="text-sm font-mono text-slate-700">
+                      {shortAddr(account)}
+                    </p>
+                  </div>
+                </div>
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    isWrongNetwork
+                      ? "bg-rose-100 text-rose-700"
+                      : "bg-brand-100 text-brand-700"
+                  }`}
+                >
+                  {isWrongNetwork ? "Salah jaringan" : network}
+                </span>
+              </div>
+            </div>
+          )}
 
-        {/* ── Catatan ── */}
-        <p style={styles.note}>
-          Transaksi diproses di Ethereum Sepolia Testnet. ETH yang digunakan
-          adalah ETH testnet (tidak bernilai nyata).
-        </p>
+          <AnimatePresence>
+            {isWrongNetwork && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+              >
+                <span className="text-xs font-medium text-amber-800">
+                  Gunakan Sepolia Testnet
+                </span>
+                <button
+                  onClick={switchToSepolia}
+                  className="rounded-full bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white"
+                  type="button"
+                >
+                  Switch
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div>
+            <label className="text-sm font-semibold text-slate-700">
+              Jumlah Donasi (ETH)
+            </label>
+            <div className="relative mt-2 flex items-center">
+              <input
+                type="number"
+                step="0.001"
+                min="0.001"
+                placeholder="0.05"
+                value={amount}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  if (status === STATUS.SUCCESS || status === STATUS.ERROR) {
+                    setStatus(STATUS.IDLE);
+                  }
+                }}
+                disabled={isLoading || !account || isWrongNetwork}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-24 text-sm font-semibold text-slate-700 outline-none transition focus:border-brand-500 disabled:opacity-50"
+              />
+              <span className="absolute right-4 text-xs font-semibold text-slate-500">
+                {idrEstimate}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex gap-2 text-xs">
+            {[
+              { label: "0.01 ETH", value: "0.01" },
+              { label: "0.05 ETH", value: "0.05" },
+              { label: "0.1 ETH", value: "0.1" },
+            ].map((preset) => (
+              <button
+                key={preset.value}
+                className="flex-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 font-semibold text-slate-700"
+                onClick={() => setAmount(preset.value)}
+                type="button"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <label className="text-sm font-semibold text-slate-700">
+              Pesan Donatur
+            </label>
+            <input
+              type="text"
+              placeholder="Dari Alumni 2020"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              disabled={isLoading || !account || isWrongNetwork}
+              maxLength={100}
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-brand-500 disabled:opacity-50"
+            />
+          </div>
+
+          <button
+            onClick={handleDonate}
+            disabled={isLoading || !account || isWrongNetwork || !amount}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-sm font-semibold text-slate-900 shadow-soft transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+            type="button"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {status === STATUS.WAITING_WALLET
+                  ? "Menunggu persetujuan MetaMask"
+                  : "Memproses transaksi"}
+              </>
+            ) : (
+              <>
+                <Heart className="h-4 w-4" />
+                Donasi Sekarang
+              </>
+            )}
+          </button>
+
+          <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
+            <Lock className="h-3.5 w-3.5" />
+            Transaksi aman via Smart Contract
+          </div>
+
+          <AnimatePresence mode="popLayout">
+            {status === STATUS.SUCCESS && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"
+              >
+                <div className="flex items-start gap-3 text-emerald-700">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <div>
+                    <p className="text-sm font-semibold">Donasi Berhasil!</p>
+                    <p className="text-xs">
+                      Transaksi Anda tercatat permanen di blockchain.
+                    </p>
+                    {txHash && (
+                      <a
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"
+                        href={`https://sepolia.etherscan.io/tx/${txHash}`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Lihat di Etherscan <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {status === STATUS.ERROR && errorMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"
+              >
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5" />
+                  <p>{errorMsg}</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// STYLES (inline — tidak perlu CSS module / Tailwind)
-// ════════════════════════════════════════════════════════════════════════════
-const styles = {
-  wrapper: {
-    fontFamily: "system-ui, sans-serif",
-    maxWidth: 420,
-    borderRadius: 16,
-    border: "1px solid #e2e8f0",
-    overflow: "hidden",
-    background: "#ffffff",
-  },
-  hero: {
-    background: "#0F6E56",
-    padding: "20px 20px 16px",
-    textAlign: "center",
-  },
-  heroLabel: {
-    margin: "0 0 4px",
-    fontSize: 11,
-    color: "#9FE1CB",
-    letterSpacing: "0.05em",
-    textTransform: "uppercase",
-  },
-  heroAmount: {
-    margin: "0 0 4px",
-    fontSize: 30,
-    fontWeight: 600,
-    color: "#ffffff",
-  },
-  heroSub: {
-    margin: 0,
-    fontSize: 11,
-    color: "#5DCAA5",
-  },
-  body: {
-    padding: 20,
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-  },
-  walletRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "8px 12px",
-    background: "#f8faf9",
-    borderRadius: 8,
-    border: "1px solid #e2e8f0",
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    background: "#1D9E75",
-    flexShrink: 0,
-  },
-  walletAddr: { fontSize: 13, color: "#374151", fontFamily: "monospace", flex: 1 },
-  badgeOk: {
-    fontSize: 11,
-    padding: "2px 8px",
-    borderRadius: 20,
-    background: "#EAF3DE",
-    color: "#3B6D11",
-    fontWeight: 500,
-  },
-  badgeDanger: {
-    fontSize: 11,
-    padding: "2px 8px",
-    borderRadius: 20,
-    background: "#FCEBEB",
-    color: "#A32D2D",
-    fontWeight: 500,
-  },
-  btnConnect: {
-    width: "100%",
-    padding: "10px 0",
-    background: "#0F6E56",
-    color: "#fff",
-    border: "none",
-    borderRadius: 10,
-    fontSize: 14,
-    fontWeight: 500,
-    cursor: "pointer",
-  },
-  alertWarn: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    padding: "10px 12px",
-    background: "#FAEEDA",
-    borderRadius: 8,
-    fontSize: 12,
-    color: "#854F0B",
-  },
-  btnSwitch: {
-    padding: "4px 10px",
-    background: "#BA7517",
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    fontSize: 11,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-  formGroup: { display: "flex", flexDirection: "column", gap: 6 },
-  label: { fontSize: 13, fontWeight: 500, color: "#374151" },
-  inputRow: { display: "flex", alignItems: "center", gap: 8 },
-  input: {
-    flex: 1,
-    padding: "10px 12px",
-    borderRadius: 8,
-    border: "1px solid #d1d5db",
-    fontSize: 14,
-    color: "#111827",
-    outline: "none",
-    background: "#f9fafb",
-  },
-  ethBadge: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#6b7280",
-    minWidth: 32,
-  },
-  idrHint: { margin: 0, fontSize: 11, color: "#9ca3af" },
-  btnDonate: {
-    width: "100%",
-    padding: "12px 0",
-    background: "#0F6E56",
-    color: "#fff",
-    border: "none",
-    borderRadius: 10,
-    fontSize: 14,
-    fontWeight: 500,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    transition: "opacity 0.2s",
-  },
-  spinner: {
-    width: 14,
-    height: 14,
-    border: "2px solid rgba(255,255,255,0.3)",
-    borderTopColor: "#fff",
-    borderRadius: "50%",
-    animation: "spin 0.7s linear infinite",
-  },
-  alertSuccess: {
-    padding: "10px 12px",
-    background: "#EAF3DE",
-    borderRadius: 8,
-    fontSize: 12,
-    color: "#3B6D11",
-  },
-  alertError: {
-    padding: "10px 12px",
-    background: "#FCEBEB",
-    borderRadius: 8,
-    fontSize: 12,
-    color: "#A32D2D",
-  },
-  txPending: { margin: 0, fontSize: 11, color: "#6b7280" },
-  txLink: { color: "#0F6E56", fontSize: 12 },
-  note: {
-    margin: 0,
-    fontSize: 11,
-    color: "#9ca3af",
-    textAlign: "center",
-    lineHeight: 1.5,
-  },
-};
