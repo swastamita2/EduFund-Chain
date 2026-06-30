@@ -1,4 +1,5 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
+import { motion, useScroll, useTransform } from "framer-motion";
 import { STATUS } from "../constants/blockchain";
 
 // Target kampanye dalam ETH (sesuaikan dengan kebutuhan)
@@ -86,12 +87,41 @@ export function HeroSection({
   txHash,
   balance,
 }) {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ["start start", "end start"],
+  });
+  
+  // Parallax effects for the background image
+  const backgroundY = useTransform(scrollYProgress, [0, 1], ["0%", "40%"]);
+  const opacityFade = useTransform(scrollYProgress, [0, 1], [0.2, 0]);
+
+  // Stagger variants for the left content
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.15 },
+    },
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    show: { 
+      opacity: 1, 
+      y: 0, 
+      transition: { type: "spring", stiffness: 300, damping: 24 } 
+    },
+  };
+
   return (
-    <header id="campaigns" className="relative pt-24 pb-32 overflow-hidden bg-surface-container-low">
-      <div className="absolute inset-0 z-0">
-        <img
+    <header ref={ref} id="campaigns" className="relative pt-24 pb-32 overflow-hidden bg-surface-container-low">
+      <div className="absolute inset-0 z-0 overflow-hidden">
+        <motion.img
+          style={{ y: backgroundY, opacity: opacityFade }}
           alt="Hero background of children learning"
-          className="w-full h-full object-cover opacity-20 object-center"
+          className="w-full h-[120%] object-cover object-center"
           src="https://lh3.googleusercontent.com/aida-public/AB6AXuB9CzyuqdMUk4F0bl9PZ5VXL9LUYauwBVUtRlSudyFOZuZdij95Vm2XHVxmeVeY3RN-finE2YvYapWru1VzQDUpfRYWPY_VGm5gUdJ1EQAVl-t1eUi3iJ1-GhtRCdeEcOothL1JjeH2_i2VrL-MrVWYN7p8HjctU8CVeJm0koH1pfIbEQcYE0EZ-aEhB6rGpXDbYNHgckL8kH3t-WC-uOzaNTYdmdWEH9z1Y934AkWSmDa0A3Lj9dS6wIBQw-p50o-ce7qh4U2NHSI"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-surface-container-low via-surface-container-low/90 to-transparent"></div>
@@ -99,45 +129,59 @@ export function HeroSection({
 
       <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop relative z-10 grid md:grid-cols-2 gap-gutter items-center">
         {/* LEFT: Copy + CTA */}
-        <div className="flex flex-col gap-6 max-w-xl">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-secondary-container/20 text-on-secondary-container rounded-full w-max">
+        <motion.div 
+          className="flex flex-col gap-6 max-w-xl"
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+        >
+          <motion.div variants={itemVariants} className="inline-flex items-center gap-2 px-4 py-2 bg-secondary-container/20 text-on-secondary-container rounded-full w-max">
             <span className="material-symbols-outlined text-[18px]">child_care</span>
             <span className="font-label-sm text-label-sm">Pendidikan Usia Dini (PAUD)</span>
-          </div>
-          <h1 className="font-headline-xl-mobile text-headline-xl-mobile md:font-headline-xl md:text-headline-xl text-on-surface">
+          </motion.div>
+          
+          <motion.h1 variants={itemVariants} className="font-headline-xl-mobile text-headline-xl-mobile md:font-headline-xl md:text-headline-xl text-on-surface">
             Wujudkan Masa Depan Cerah Melalui Pendidikan Usia Dini
-          </h1>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">
+          </motion.h1>
+          
+          <motion.p variants={itemVariants} className="font-body-lg text-body-lg text-on-surface-variant">
             Bantu anak-anak PAUD mendapatkan fasilitas belajar yang layak melalui
             sistem donasi Ethereum yang transparan dan aman. Setiap kontribusi
             Anda membangun fondasi belajar mereka.
-          </p>
+          </motion.p>
 
           {/* PROGRESS BAR KAMPANYE */}
-          <div className="bg-surface-container-lowest/80 backdrop-blur-sm rounded-2xl px-5 py-4 border border-outline-variant/40 shadow-sm">
+          <motion.div variants={itemVariants} className="bg-surface-container-lowest/80 backdrop-blur-sm rounded-2xl px-5 py-4 border border-outline-variant/40 shadow-sm hover:shadow-md transition-shadow">
             <ProgressBar balance={balance} />
-          </div>
+          </motion.div>
 
-          <div className="flex flex-wrap gap-4 mt-2">
-            <a
-              className="px-8 py-4 rounded-full font-label-md text-label-md bg-primary text-on-primary hover:bg-primary/90 transition-all shadow-sm ambient-shadow hover:-translate-y-0.5 active:scale-95 flex items-center gap-2"
+          <motion.div variants={itemVariants} className="flex flex-wrap gap-4 mt-2">
+            <motion.a
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="px-8 py-4 rounded-full font-label-md text-label-md bg-primary text-on-primary hover:bg-primary/90 transition-colors shadow-sm ambient-shadow flex items-center gap-2"
               href="#donate"
             >
               <span>Mulai Berdonasi</span>
               <span className="material-symbols-outlined">arrow_forward</span>
-            </a>
-            <a
-              className="px-8 py-4 rounded-full font-label-md text-label-md text-primary border-2 border-primary hover:bg-surface-container transition-colors active:scale-95"
+            </motion.a>
+            <motion.a
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="px-8 py-4 rounded-full font-label-md text-label-md text-primary border-2 border-primary hover:bg-surface-container transition-colors"
               href="#transparency"
             >
               Pelajari Transparansi
-            </a>
-          </div>
-        </div>
+            </motion.a>
+          </motion.div>
+        </motion.div>
 
         {/* RIGHT: Donation Card */}
-        <div
+        <motion.div
           id="donate"
+          initial={{ opacity: 0, x: 50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.8, type: "spring", delay: 0.2 }}
           className="glass-card rounded-[24px] p-8 ambient-shadow relative mt-12 md:mt-0 max-w-md ml-auto border border-white"
         >
           <div className="absolute -top-6 -right-6 w-24 h-24 bg-secondary-container rounded-full blur-3xl opacity-50"></div>
@@ -194,14 +238,16 @@ export function HeroSection({
             {/* Preset amounts */}
             <div className="flex gap-2">
               {["0.01", "0.05", "0.1"].map((preset) => (
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   key={preset}
                   className="flex-1 py-2 px-3 rounded-full bg-surface-container hover:bg-surface-container-high transition-colors font-label-sm text-label-sm text-on-surface border border-outline-variant"
                   type="button"
                   onClick={() => setAmount(preset)}
                 >
                   {preset} ETH
-                </button>
+                </motion.button>
               ))}
             </div>
 
@@ -243,10 +289,15 @@ export function HeroSection({
             )}
 
             {/* Submit button */}
-            <button
-              className="w-full py-4 rounded-xl bg-secondary-container text-on-secondary-container font-label-md text-label-md hover:bg-secondary-fixed transition-colors active:scale-95 shadow-sm flex justify-center items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              type="button"
-              onClick={handleDonate}
+            <motion.button
+              whileHover={(!isLoading && !isWrongNetwork) ? { scale: 1.02 } : {}}
+              whileTap={(!isLoading && !isWrongNetwork) ? { scale: 0.98 } : {}}
+              className={`w-full py-4 rounded-xl font-label-lg text-label-lg text-on-primary flex justify-center items-center gap-2 transition-colors ${
+                isLoading || isWrongNetwork
+                  ? "bg-on-surface/12 text-on-surface/38 cursor-not-allowed"
+                  : "bg-primary hover:bg-primary/90 ambient-shadow"
+              }`}
+              type="submit"
               disabled={isLoading || isWrongNetwork || !amount}
             >
               <span
@@ -261,7 +312,7 @@ export function HeroSection({
                   ? "Menunggu MetaMask…"
                   : "Memproses Transaksi…"
                 : "Donasi Sekarang"}
-            </button>
+            </motion.button>
 
             {/* Status messages */}
             {status === STATUS.WAITING_WALLET && (
@@ -301,7 +352,7 @@ export function HeroSection({
               </a>
             </div>
           )}
-        </div>
+        </motion.div>
       </div>
     </header>
   );

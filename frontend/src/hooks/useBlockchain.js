@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ethers } from "ethers";
 import {
   EDUFUND_ABI,
@@ -24,6 +24,8 @@ export function useBlockchain() {
   const [errorMsg, setErrorMsg] = useState("");
   const [txHash, setTxHash] = useState("");
   const [history, setHistory] = useState([]);
+  // Ref sinkronus untuk mencegah duplikasi — tidak terpengaruh async React state batching
+  const processedTxHashes = useRef(new Set());
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawStatus, setWithdrawStatus] = useState(STATUS.IDLE);
   const [withdrawError, setWithdrawError] = useState("");
@@ -189,6 +191,13 @@ export function useBlockchain() {
           };
         });
 
+        // Sinkronkan processed set dengan data terbaru dari chain
+        if (!options.append) {
+          processedTxHashes.current = new Set(items.map((i) => i.txHash));
+        } else {
+          items.forEach((i) => processedTxHashes.current.add(i.txHash));
+        }
+
         setHistory((prev) =>
           options.append ? mergeHistory(prev, items) : mergeHistory([], items)
         );
@@ -333,8 +342,9 @@ export function useBlockchain() {
       await tx.wait(1);
       setStatus(STATUS.SUCCESS);
       setAmount("");
+      // Hanya refresh stats — live event listener sudah menangani penambahan ke history
+      // fetchHistory DIHAPUS dari sini untuk mencegah duplikasi dengan live listener
       await fetchStats(provider);
-      await fetchHistory(provider);
     } catch (err) {
       if (err.code === 4001 || err.code === "ACTION_REJECTED") {
         setErrorMsg("Transaksi dibatalkan oleh pengguna.");
@@ -345,7 +355,7 @@ export function useBlockchain() {
       }
       setStatus(STATUS.ERROR);
     }
-  }, [account, amount, fetchHistory, fetchStats, isWrongNetwork, message, isPaused]);
+  }, [account, amount, fetchStats, isWrongNetwork, message, isPaused]);
 
   const handleWithdraw = useCallback(async () => {
     setWithdrawError("");
@@ -457,7 +467,18 @@ export function useBlockchain() {
     const contract = new ethers.Contract(CONTRACT_ADDRESS, EDUFUND_ABI, provider);
 
     const handleDonation = (donor, amountValue, messageVal, timestamp, event) => {
-      const txHashValue = event?.transactionHash || "";
+      // In ethers v6, the last argument is an EventPayload which contains the log object
+      const txHashValue = event?.log?.transactionHash || event?.transactionHash || "";
+
+      // GUARD SINKRONUS: Cek ref dahulu sebelum menyentuh state apapun.
+      // useRef tidak terpengaruh async batching React, sehingga aman dari race condition.
+      if (txHashValue) {
+        if (processedTxHashes.current.has(txHashValue)) {
+          return; // Sudah diproses — abaikan event duplikat ini
+        }
+        processedTxHashes.current.add(txHashValue);
+      }
+
       const formattedAmount = ethers.formatEther(amountValue);
       const nextItem = {
         donor,
@@ -467,15 +488,10 @@ export function useBlockchain() {
         txHash: txHashValue,
       };
 
-      setHistory((prev) => {
-        if (txHashValue && prev.some((item) => item.txHash === txHashValue)) {
-          return prev;
-        }
-        return [nextItem, ...prev].slice(0, 50);
-      });
+      setHistory((prev) => [nextItem, ...prev].slice(0, 50));
       fetchStats(provider);
 
-      // Add toast notification
+      // Tampilkan toast notifikasi real-time
       setToasts((prev) => [
         ...prev,
         {

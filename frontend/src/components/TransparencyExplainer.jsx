@@ -35,10 +35,7 @@ export function TransparencyExplainer() {
           </div>
         </div>
         <div className="order-1 md:order-2 flex flex-col gap-6">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-surface-container-high rounded-full w-max">
-            <span className="material-symbols-outlined text-[18px] text-primary">block</span>
-            <span className="font-label-sm text-label-sm text-on-surface">Teknologi Blockchain</span>
-          </div>
+
           <h2 className="font-headline-lg text-headline-lg text-on-surface">
             Jejak Kebaikan yang Dapat Dilacak
           </h2>

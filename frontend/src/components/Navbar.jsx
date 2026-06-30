@@ -1,4 +1,12 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+
+const NAV_ITEMS = [
+  { id: "campaigns", label: "Campaigns" },
+  { id: "impact", label: "Impact" },
+  { id: "transparency", label: "Transparency" },
+  { id: "about", label: "About" },
+];
 
 export function Navbar({
   account,
@@ -13,15 +21,33 @@ export function Navbar({
   switchToSepolia,
   shortAddr,
 }) {
+  const [activeTab, setActiveTab] = useState("campaigns");
+
+  // Scroll spy logic
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollPosition = window.scrollY + window.innerHeight / 3; // Trigger earlier
+      for (let i = NAV_ITEMS.length - 1; i >= 0; i--) {
+        const section = document.getElementById(NAV_ITEMS[i].id);
+        if (section && section.offsetTop <= scrollPosition) {
+          setActiveTab(NAV_ITEMS[i].id);
+          break;
+        }
+      }
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   return (
     <nav className="bg-surface/95 backdrop-blur-md shadow-sm top-0 sticky z-50 transition-all duration-300">
       <div className="flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop h-20 max-w-container-max mx-auto">
         <a
-          className="text-headline-md font-headline-md font-bold text-primary dark:text-primary-fixed flex items-center gap-2"
+          className="text-title-lg md:text-headline-sm font-headline-sm font-bold text-primary dark:text-primary-fixed flex items-center gap-2 whitespace-nowrap"
           href="#"
         >
           <span
-            className="material-symbols-outlined"
+            className="material-symbols-outlined text-[28px]"
             data-weight="fill"
             style={{ fontVariationSettings: '"FILL" 1' }}
           >
@@ -29,33 +55,30 @@ export function Navbar({
           </span>
           EduFund Chain
         </a>
-        <div className="hidden md:flex items-center gap-8">
-          <a
-            className="text-primary dark:text-primary-fixed border-b-2 border-primary dark:border-primary-fixed pb-1 font-label-md text-label-md hover:text-primary dark:hover:text-primary-fixed transition-colors"
-            href="#campaigns"
-          >
-            Campaigns
-          </a>
-          <a
-            className="text-on-surface-variant dark:text-surface-variant font-label-md text-label-md hover:text-primary dark:hover:text-primary-fixed transition-colors"
-            href="#impact"
-          >
-            Impact
-          </a>
-          <a
-            className="text-on-surface-variant dark:text-surface-variant font-label-md text-label-md hover:text-primary dark:hover:text-primary-fixed transition-colors"
-            href="#transparency"
-          >
-            Transparency
-          </a>
-          <a
-            className="text-on-surface-variant dark:text-surface-variant font-label-md text-label-md hover:text-primary dark:hover:text-primary-fixed transition-colors"
-            href="#about"
-          >
-            About
-          </a>
+        <div className="hidden lg:flex items-center gap-2 lg:gap-8">
+          {NAV_ITEMS.map((item) => (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              onClick={() => setActiveTab(item.id)}
+              className={`relative px-1 py-2 font-label-md text-label-md transition-colors ${
+                activeTab === item.id 
+                  ? "text-primary dark:text-primary-fixed font-bold" 
+                  : "text-on-surface-variant dark:text-surface-variant hover:text-primary"
+              }`}
+            >
+              {item.label}
+              {activeTab === item.id && (
+                <motion.div
+                  layoutId="activeTabIndicator"
+                  className="absolute left-0 right-0 bottom-0 h-[3px] rounded-t-sm bg-primary dark:bg-primary-fixed"
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                />
+              )}
+            </a>
+          ))}
         </div>
-        <div className="hidden md:flex items-center gap-4">
+        <div className="hidden md:flex items-center gap-3">
           {account && (
             <span
               className={`rounded-full px-3 py-1 text-label-sm font-label-sm ${

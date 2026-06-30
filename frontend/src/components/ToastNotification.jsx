@@ -68,7 +68,7 @@ function ToastItem({ toast, onDismiss }) {
         </p>
         {toast.message && (
           <p className="font-body-sm text-body-sm text-on-surface-variant italic truncate mt-0.5">
-            "{toast.message}"
+            &ldquo;{toast.message}&rdquo;
           </p>
         )}
         <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
